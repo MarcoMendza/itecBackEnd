@@ -3,6 +3,8 @@ from pydantic import BaseModel, validator
 from datetime import date
 from typing import Optional
 from connection import get_db_connection
+from mysql.connector import errors as mysql_errors
+
 
 router = APIRouter()
 
@@ -109,15 +111,27 @@ async def update_order(order_id: int, order: OrderUpdate):
 
 @router.delete("/orders/{order_id}")
 async def delete_order(order_id: int):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute('DELETE FROM Orders WHERE id = %s', (order_id,))
-    deleted = cursor.rowcount
-    conn.commit()
-    cursor.close()
-    conn.close()
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM Orders WHERE id = %s', (order_id,))
+        deleted = cursor.rowcount
+        conn.commit()
+        cursor.close()
+        conn.close()
 
-    if deleted == 0:
-        raise HTTPException(status_code=404, detail="Order not found")
+        if deleted == 0:
+            raise HTTPException(status_code=404, detail="Order not found")
 
-    return {"message": "Order deleted successfully"}
+        return {"message": "Order deleted successfully"}
+    except mysql_errors.DatabaseError as e:
+        if e.errno == mysql_errors.ER_LOCK_WAIT_TIMEOUT:
+            raise HTTPException(
+                status_code=408,  # 408 Request Timeout
+                detail="Database operation timed out. Please try again later."
+            )
+        else:
+            raise HTTPException(
+                status_code=500,  # 500 Internal Server Error
+                detail="An error occurred while processing your request."
+            )

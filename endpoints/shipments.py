@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field
 from datetime import date
 from typing import Optional
 from connection import get_db_connection
+from mysql.connector import errors as mysql_errors
 
 router = APIRouter()
 
@@ -96,15 +97,27 @@ async def update_shipment(shipment_id: int, shipment: ShipmentUpdate):
 
 @router.delete("/shipments/{shipment_id}")
 async def delete_shipment(shipment_id: int):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute('DELETE FROM Shipments WHERE id = %s', (shipment_id,))
-    deleted = cursor.rowcount
-    conn.commit()
-    cursor.close()
-    conn.close()
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM Shipments WHERE id = %s', (shipment_id,))
+        deleted = cursor.rowcount
+        conn.commit()
+        cursor.close()
+        conn.close()
 
-    if deleted == 0:
-        raise HTTPException(status_code=404, detail="Shipment not found")
+        if deleted == 0:
+            raise HTTPException(status_code=404, detail="Shipment not found")
 
-    return {"message": "Shipment deleted successfully"}
+        return {"message": "Shipment deleted successfully"}
+    except mysql_errors.DatabaseError as e:
+        if e.errno == mysql_errors.ER_LOCK_WAIT_TIMEOUT:
+            raise HTTPException(
+                status_code=408,  # 408 Request Timeout
+                detail="Database operation timed out. Please try again later."
+            )
+        else:
+            raise HTTPException(
+                status_code=500,  # 500 Internal Server Error
+                detail="An error occurred while processing your request."
+            )
